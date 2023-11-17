@@ -307,7 +307,7 @@ std::list<orb_extractor_node> orb_extractor::initialize_nodes(const std::vector<
         // If the aspect ratio is equal to or less than 1, the patches are made in a vertical direction
         num_x_grid = 1;
         num_y_grid = std::round(1 / ratio);
-        delta_x = max_x - min_y;
+        delta_x = max_x - min_x;
         delta_y = static_cast<double>(max_y - min_y) / num_y_grid;
     }
 
