@@ -18,13 +18,19 @@ relocalizer::relocalizer(const std::shared_ptr<optimize::pose_optimizer>& pose_o
                          const unsigned int min_num_bow_matches, const unsigned int min_num_valid_obs,
                          const bool use_fixed_seed,
                          const bool search_neighbor,
-                         const unsigned int top_n_covisibilities_to_search)
+                         const unsigned int top_n_covisibilities_to_search,
+                         const float num_common_words_thr_ratio,
+                         const unsigned int max_num_ransac_iter,
+                         const unsigned int max_num_local_keyfrms)
     : min_num_bow_matches_(min_num_bow_matches), min_num_valid_obs_(min_num_valid_obs),
       bow_matcher_(bow_match_lowe_ratio, false), proj_matcher_(proj_match_lowe_ratio, false),
       robust_matcher_(robust_match_lowe_ratio, false),
       pose_optimizer_(pose_optimizer), use_fixed_seed_(use_fixed_seed),
       search_neighbor_(search_neighbor),
-      top_n_covisibilities_to_search_(top_n_covisibilities_to_search) {
+      top_n_covisibilities_to_search_(top_n_covisibilities_to_search),
+      num_common_words_thr_ratio_(num_common_words_thr_ratio),
+      max_num_ransac_iter_(max_num_ransac_iter),
+      max_num_local_keyfrms_(max_num_local_keyfrms) {
     spdlog::debug("CONSTRUCT: module::relocalizer");
 }
 
@@ -37,7 +43,10 @@ relocalizer::relocalizer(const std::shared_ptr<optimize::pose_optimizer>& pose_o
                   yaml_node["min_num_valid_obs"].as<unsigned int>(50),
                   yaml_node["use_fixed_seed"].as<bool>(false),
                   yaml_node["search_neighbor"].as<bool>(true),
-                  yaml_node["top_n_covisibilities_to_search"].as<unsigned int>(10)) {
+                  yaml_node["top_n_covisibilities_to_search"].as<unsigned int>(10),
+                  yaml_node["num_common_words_thr_ratio"].as<float>(0.8f),
+                  yaml_node["max_num_ransac_iter"].as<unsigned int>(30),
+                  yaml_node["max_num_local_keyfrms"].as<unsigned int>(60)) {
 }
 
 relocalizer::~relocalizer() {
@@ -46,7 +55,7 @@ relocalizer::~relocalizer() {
 
 bool relocalizer::relocalize(data::bow_database* bow_db, data::frame& curr_frm) {
     // Acquire relocalization candidates
-    const auto reloc_candidates = bow_db->acquire_keyframes(curr_frm.bow_vec_);
+    const auto reloc_candidates = bow_db->acquire_keyframes(curr_frm.bow_vec_, 0.0f, num_common_words_thr_ratio_);
     if (reloc_candidates.empty()) {
         return false;
     }
@@ -185,7 +194,7 @@ bool relocalizer::relocalize_by_pnp_solver(data::frame& curr_frm,
 
     // 1. Estimate the camera pose using EPnP (+ RANSAC)
 
-    pnp_solver->find_via_ransac(30, false);
+    pnp_solver->find_via_ransac(max_num_ransac_iter_, false);
     if (!pnp_solver->solution_is_valid()) {
         spdlog::debug("solution is not valid. candidate keyframe id is {}", candidate_keyfrm->id_);
         return false;
@@ -290,8 +299,7 @@ bool relocalizer::refine_pose(data::frame& curr_frm,
 bool relocalizer::refine_pose_by_local_map(data::frame& curr_frm,
                                            const std::shared_ptr<stella_vslam::data::keyframe>& candidate_keyfrm) const {
     // Create local map
-    constexpr unsigned int max_num_local_keyfrms = 10;
-    auto local_map_updater = module::local_map_updater(max_num_local_keyfrms);
+    auto local_map_updater = module::local_map_updater(max_num_local_keyfrms_);
     if (!local_map_updater.acquire_local_map(curr_frm.get_landmarks(), curr_frm.frm_obs_.num_keypts_)) {
         return false;
     }
